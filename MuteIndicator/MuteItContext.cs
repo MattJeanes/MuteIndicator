@@ -1,7 +1,13 @@
-﻿using System;
+﻿using NAudio.CoreAudioApi;
+using Q42.HueApi;
+using Q42.HueApi.ColorConverters;
+using Q42.HueApi.ColorConverters.Original;
+using Q42.HueApi.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using NAudio.CoreAudioApi;
 
 namespace MuteIndicator
 {
@@ -17,36 +23,44 @@ namespace MuteIndicator
 
         private readonly NotifyIcon _tbIcon;
         private readonly System.Timers.Timer _refreshTimer;
+        private readonly HotkeyManager _manager;
+        internal static SettingsForm _settings;
+        private bool _init;
+        private bool _muted;
 
         public MuteItContext()
         {
             _tbIcon = CreateIcon();
             UpdateMicStatus();
             _refreshTimer = StartTimer();
-            RegisterHotkeys();
+            _manager = RegisterHotkeys();
         }
 
         private HotkeyManager RegisterHotkeys()
         {
             var manager = new HotkeyManager(this);
 
-            RegisterHotKey(manager.Handle, MUTE_TOGGLE_CODE, Constants.ALT, (int)Keys.OemBackslash);
+            RegisterHotKey(manager.Handle, MUTE_TOGGLE_CODE, Constants.CTRL, (int)Keys.OemPipe);
 
             return manager;
         }
 
         private NotifyIcon CreateIcon()
         {
-            var exitMenuItem = new ToolStripMenuItem("Exit");
-            exitMenuItem.Click += new EventHandler(HandleExit);
 
             var icon = new NotifyIcon();
             icon.Icon = Properties.Resources.mic_off;
             icon.ContextMenuStrip = new ContextMenuStrip();
-            icon.ContextMenuStrip.Items.Add(exitMenuItem);
             icon.DoubleClick += (source, e) => ToggleMicStatus();
-
             icon.Visible = true;
+
+            var exitMenuItem = new ToolStripMenuItem("Exit");
+            exitMenuItem.Click += new EventHandler(HandleExit);
+            icon.ContextMenuStrip.Items.Add(exitMenuItem);
+
+            var settingsMenuItem = new ToolStripMenuItem("Settings");
+            settingsMenuItem.Click += new EventHandler(HandleSettings);
+            icon.ContextMenuStrip.Items.Add(settingsMenuItem);
 
             return icon;
         }
@@ -59,31 +73,6 @@ namespace MuteIndicator
             return timer;
         }
 
-        public void SetMicMuteStatus(bool doMute)
-        {
-            var device = GetPrimaryMicDevice();
-
-            if (device != null)
-            {
-                device.AudioEndpointVolume.Mute = doMute;
-                UpdateMicStatus(device);
-            }
-            else
-            {
-                UpdateMicStatus(null);
-            }
-        }
-
-        public void MuteMic()
-        {
-            SetMicMuteStatus(true);
-        }
-
-        public void UnmuteMic()
-        {
-            SetMicMuteStatus(false);
-        }
-
         public void ToggleMicStatus()
         {
             var device = GetPrimaryMicDevice();
@@ -91,29 +80,69 @@ namespace MuteIndicator
             if (device != null)
             {
                 device.AudioEndpointVolume.Mute = !device.AudioEndpointVolume.Mute;
-                UpdateMicStatus(device);
+                UpdateMicStatusAsync(device);
             }
             else
             {
-                UpdateMicStatus(null);
+                UpdateMicStatusAsync(null);
             }
         }
 
         private void UpdateMicStatus()
         {
             var device = GetPrimaryMicDevice();
-            UpdateMicStatus(device);
-            //System.GC.Collect();
+            UpdateMicStatusAsync(device);
         }
 
-        private void UpdateMicStatus(MMDevice device)
+        private async void UpdateMicStatusAsync(MMDevice device)
         {
+            bool muted;
             if (device == null || device.AudioEndpointVolume.Mute == true)
-                _tbIcon.Icon = Properties.Resources.mic_off;
+            {
+                muted = true;
+            }
             else
-                _tbIcon.Icon = Properties.Resources.mic_on;
+            {
+                muted = false;
+            }
+
+            var hueKey = Properties.Settings.Default.HueKey;
+            var hueLights = Properties.Settings.Default.HueLights?.Cast<string>().ToList() ?? new List<string>();
+            var hueLinked = !string.IsNullOrEmpty(hueKey) && hueLights.Count > 0;
+            var changed = (muted != _muted) || !_init;
+            ILocalHueClient hueClient = null;
+            if (hueLinked)
+            {
+                hueClient = new LocalHueClient(Properties.Settings.Default.HueIPAddress, Properties.Settings.Default.HueKey);
+            }
+
+            try
+            {
+                _tbIcon.Icon = muted ? Properties.Resources.mic_off : Properties.Resources.mic_on;
+                if (hueLinked && changed)
+                {
+                    var command = new LightCommand();
+                    var color = muted ? new RGBColor(255, 0, 0) : new RGBColor(255, 255, 255);
+                    command.SetColor(color);
+                    await hueClient.SendCommandAsync(command, hueLights);
+                }
+            }
+            catch (Exception e)
+            {
+                if (changed)
+                {
+                    MessageBox.Show($"Failed to update mic status: {e.Message}");
+                }
+            }
+
 
             DisposeDevice(device);
+
+            if (!_init)
+            {
+                _init = true;
+            }
+            _muted = muted;
         }
 
         private MMDevice GetPrimaryMicDevice()
@@ -141,6 +170,16 @@ namespace MuteIndicator
             _tbIcon.Visible = false;
             _refreshTimer.Stop();
             Application.Exit();
+        }
+
+        private void HandleSettings(object sender, EventArgs e)
+        {
+            if (_settings == null || _settings.IsDisposed)
+            {
+                _settings = new SettingsForm();
+            }
+            _settings.Show();
+            _settings.BringToFront();
         }
     }
 }
