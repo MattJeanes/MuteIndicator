@@ -40,6 +40,7 @@ namespace MuteIndicator
         {
             var manager = new HotkeyManager(this);
 
+            // TODO: Make hotkey configurable
             RegisterHotKey(manager.Handle, MUTE_TOGGLE_CODE, Constants.CTRL, (int)Keys.OemPipe);
 
             return manager;
@@ -75,6 +76,7 @@ namespace MuteIndicator
 
         public void ToggleMicStatus()
         {
+            // TODO: Make Mics configurable (multiple mics)
             var device = GetPrimaryMicDevice();
 
             if (device != null)
@@ -122,6 +124,7 @@ namespace MuteIndicator
                 if (hueLinked && changed)
                 {
                     var command = new LightCommand();
+                    // TODO: Make colours configurable
                     var color = muted ? new RGBColor(255, 0, 0) : new RGBColor(255, 255, 255);
                     command.SetColor(color);
                     await hueClient.SendCommandAsync(command, hueLights);

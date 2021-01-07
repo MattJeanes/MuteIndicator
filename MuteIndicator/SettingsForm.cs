@@ -113,6 +113,8 @@ namespace MuteIndicator
         private async void unlinkHueButton_Click(object sender, EventArgs e)
         {
             Properties.Settings.Default.HueKey = null;
+            Properties.Settings.Default.HueIPAddress = null;
+            Properties.Settings.Default.HueLights = null;
             Properties.Settings.Default.Save();
             statusLabel.Text = "Status: Hue bridge unlinked";
             linkHueButton.Enabled = true;
